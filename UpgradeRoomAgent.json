@@ -1,0 +1,390 @@
+{
+  "name": "Room AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "group": "booking-v1",
+        "resource": "Reservation",
+        "operation": "BookingReservationsByIdGet",
+        "BookingReservationsByIdGet_id": "={{ $json.data.entityId }}",
+        "additionalFields": {},
+        "requestOptions": {}
+      },
+      "type": "@apaleo/n8n-nodes-apaleo-official.apaleo",
+      "typeVersion": 1,
+      "position": [
+        64,
+        -384
+      ],
+      "id": "673a9882-6426-4998-b3f1-9473a02970bd",
+      "name": "Returns a specific reservation",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "group": "booking-v1",
+        "resource": "Booking",
+        "operation": "BookingBookingsGet",
+        "additionalFields": {
+          "textSearch": "={{ $json.primaryGuest.email}}"
+        },
+        "requestOptions": {}
+      },
+      "type": "@apaleo/n8n-nodes-apaleo-official.apaleo",
+      "typeVersion": 1,
+      "position": [
+        336,
+        -384
+      ],
+      "id": "3ce9b561-bbc6-4b68-aaf8-406f728450ac",
+      "name": "Returns a list of all bookings filtered by the specified parameters",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "group": "inventory-v1",
+        "resource": "UnitGroup",
+        "operation": "InventoryUnit-groupsGet",
+        "additionalFields": {
+          "propertyId": "={{ $('Returns a specific reservation').item.json.property.id }}"
+        },
+        "requestOptions": {}
+      },
+      "type": "@apaleo/n8n-nodes-apaleo-official.apaleo",
+      "typeVersion": 1,
+      "position": [
+        608,
+        -384
+      ],
+      "id": "9b1e9ba6-f797-4992-a2d9-2983c04005f7",
+      "name": "Get all unit groups or all unit groups for a property",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "AvailabilityUnitsGet",
+        "AvailabilityUnitsGet_propertyId": "={{ $('Returns a specific reservation').item.json.property.id }}",
+        "AvailabilityUnitsGet_from": "={{ $('Returns a specific reservation').item.json.arrival }}",
+        "AvailabilityUnitsGet_to": "={{ $('Returns a specific reservation').item.json.departure }}",
+        "additionalFields": {},
+        "requestOptions": {}
+      },
+      "type": "@apaleo/n8n-nodes-apaleo-official.apaleo",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -384
+      ],
+      "id": "7201b8a8-d118-4f04-ae2f-a5d8dc6eda13",
+      "name": "Get a list of all available units in a property",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a hotel room assignment assistant.\n\nYou are a hotel room assignment assistant.\nRules:\n1. If guest has 0 previous bookings meaning {{ $json.guestHistory.count }} is 1 (new guest), upgrade them to the next better available clean room.\n2. If guest has 5 or more bookings (regular), also upgrade them.\n3. If guest has the reservation: {{ $('Returns a specific reservation').item.json.arrival }} {{ $('Returns a specific reservation').item.json.departure }}during his birthday ({{ $json.reservation.primaryGuest.birthdate }} ) upgrade the room.\n4. Otherwise, assign them the exact unit group they reserved.\n5. Only assign rooms that:\n   - Are in the \"status\" list\n   - Have condition = \"Clean\"\n   - Have isOccupied = \"false\"\n6. If multiple upgrades are possible, choose the closest higher-ranked unit group.\n7. Never downgrade a guest.\n8. Always respond with valid JSON in this format (all fields required):\n    {\"reservationId\":\"<reservation-id>\",\"assignedUnitId\":\"<room-id>\",\"roomUpgraded\":true/false}\n9. If no valid clean/available rooms exist in the {{$json.availableUnits}}, assignUnitId must be null and roomUpgraded=false.\n10. If guest qualifies for an upgrade but no higher-ranked room is available, fall back to the reserved unit group.\n11. If multiple upgrades are possible, choose the closest higher-ranked unit group (never skip more than one step).\n12. If guest already booked the highest-ranked unit group, assign within that group.\n13. Always assign a unit belonging to the same property as the reservation.\n14. If input data is incomplete or invalid, return assignedUnitId=null and roomUpgraded=false.\n15. If there are fewer than 5 rooms available in the upgraded unit group, do NOT upgrade the guest.\n    In this case, assign them to their originally reserved unit group instead.\nIMPORTANT:\n   - Respond ONLY with a single compact JSON object and nothing else.\n    - DO NOT use ```\n    - DO NOT add explanations, new lines, or extra formatting—just compact JSON.\nData:\n{{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        16,
+        -16
+      ],
+      "id": "78eec71c-c1f2-44dc-a745-2f9b15ed5a79",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code node — aggregate all info for the AI agent\n * Mode: Run once for all items\n */\n\nconst reservation = $('Returns a specific reservation').first().json;\nconst guestHistory = $('Returns a list of all bookings filtered by the specified parameters').first().json;\n\nconst unitGroups = $('Get all unit groups or all unit groups for a property').all().map(i => i.json);\nconst availableUnits = $('Get a list of all available units in a property').all().map(i => i.json);\n\nreturn [\n  {\n    json: {\n      reservation,\n      guestHistory,\n      unitGroups,\n      availableUnits\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -16
+      ],
+      "id": "dcb0677b-956c-4ff4-af12-86558dae8c49",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        16,
+        160
+      ],
+      "id": "6fde5bc9-8321-44f1-adb3-63d81844ee68",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Vuy8TMP35qQYaO2J",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the JSON string stored in `output`\nconst parsed = JSON.parse($input.first().json.output);\nreturn parsed\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        -16
+      ],
+      "id": "5d9947c9-c495-4f93-8aa1-5d8dde313d71",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a6f4e5a8-c02e-4a2f-878c-870e2198c820",
+              "leftValue": "={{ $json.roomUpgraded }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        -16
+      ],
+      "id": "3998352e-1eac-4b37-bbf5-f42aa84d5d7b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.apaleo.com/booking/v1/reservation-actions/{{ $json.reservationId }}/assign-unit/{{ $json.assignedUnitId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "apaleoOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        -128
+      ],
+      "id": "109289d7-a813-4096-89b2-fd23010dd2b7",
+      "name": "HTTP Request",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the JSON string stored in `output`\nconst parsed = JSON.parse($('AI Agent').first().json.output);\nreturn parsed\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        96
+      ],
+      "id": "7c5abf7e-7927-40c6-ad15-89972d8770dc",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "events": "reservation/created",
+        "options": {}
+      },
+      "type": "@apaleo/n8n-nodes-apaleo-official.apaleoTrigger",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        -384
+      ],
+      "id": "591961d1-43df-4b51-a0cf-045888f21aa7",
+      "name": "Apaleo Official Trigger",
+      "webhookId": "4f7b91f4-dd2a-428e-8b0d-215210dd47ef",
+      "credentials": {
+        "apaleoOAuth2Api": {
+          "id": "d14xvWdmHFVvuQxY",
+          "name": "Apaleo account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Returns a specific reservation": {
+      "main": [
+        [
+          {
+            "node": "Returns a list of all bookings filtered by the specified parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Returns a list of all bookings filtered by the specified parameters": {
+      "main": [
+        [
+          {
+            "node": "Get all unit groups or all unit groups for a property",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get all unit groups or all unit groups for a property": {
+      "main": [
+        [
+          {
+            "node": "Get a list of all available units in a property",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a list of all available units in a property": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Apaleo Official Trigger": {
+      "main": [
+        [
+          {
+            "node": "Returns a specific reservation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3998f15e-03b2-40ca-9127-a83518813b7d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "584bba64ceec59c89eca6c88893f4475aefa6bb8dbf241dad33d43715355b32d"
+  },
+  "id": "7QEWrJC9aytmvNBn",
+  "tags": []
+}
